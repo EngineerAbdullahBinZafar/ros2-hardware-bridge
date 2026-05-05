@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ros2_hardware_bridge</name>
+  <version>1.0.0</version>
+  <description>The definitive plug-and-play bridge for ROS2 to STM32/ESP32 communication.</description>
+  <maintainer email="abz.king.1.9.2003@gmail.com">EngineerAbdullahBinZafar</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>python3-serial</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
