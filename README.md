@@ -3,6 +3,8 @@
 # 🌉 ROS2 Hardware Bridge (Micro-Link)
 **The Zero-Friction Communication Layer Between ROS2 and Embedded Microcontrollers**
 
+<img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExMDBia2R0OXA5N2YxbmZ4Ynd4Ynd4Ynd4Ynd4Ynd4Ynd4Ynd4JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/6Z9G1a3v0v0v0/giphy.gif" width="100%" />
+
 [![CI Status](https://img.shields.io/github/actions/workflow/status/EngineerAbdullahBinZafar/ros2-hardware-bridge/ci.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![ROS2: Humble/Foxy](https://img.shields.io/badge/ROS2-Humble%20/%20Foxy-22314E.svg?style=for-the-badge&logo=ros&logoColor=white)](https://docs.ros.org/en/humble/index.html)
