@@ -1,6 +1,7 @@
 <div align="center">
 
-# 🌉 ROS2 Hardware Bridge (Micro-Link)
+<img width="100%" src="https://capsule-render.vercel.app/api?type=slice&color=0:22314E,50:00d4ff,100:22314E&height=250&section=header&text=ROS2%20Hardware%20Bridge&fontSize=60&fontColor=ffffff&fontAlignY=40&stroke=ffffff&strokeWidth=1&desc=🌉%20THE%20ZERO-FRICTION%20COMMUNICATION%20LAYER%20BETWEEN%20ROBOTS&descSize=16&descAlignY=60&descColor=00d4ff&animation=fadeIn" />
+
 **The Zero-Friction Communication Layer Between ROS2 and Embedded Microcontrollers**
 
 <img src="https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExMDBia2R0OXA5N2YxbmZ4Ynd4Ynd4Ynd4Ynd4Ynd4Ynd4Ynd4JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/6Z9G1a3v0v0v0/giphy.gif" width="100%" />
