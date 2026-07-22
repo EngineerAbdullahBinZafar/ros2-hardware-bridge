@@ -1,27 +1,27 @@
-# Contributing to ROS2 Hardware Bridge
+# Contributing to `ros2-mcp-server`
 
-First off, thank you for considering contributing to this project! It's people like you who make the robotics community awesome.
+First off, thank you for considering contributing to `ros2-mcp-server`! We welcome all contributions, from bug reports and documentation fixes to major feature additions.
 
-## 🚀 How Can I Contribute?
+## Local Development & Instant Playground
 
-### Reporting Bugs
-*   Check the [Issues](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/issues) to see if it's already been reported.
-*   If not, open a new issue with a clear title and description.
+You do **not** need a physical robot or a complex ROS2 installation to develop for this repository.
+We have built a robust simulation layer that generates synthetic LiDAR, IMU, and Battery data.
 
-### Suggesting Enhancements
-*   Open an issue with the tag `enhancement`.
-*   Explain why the feature would be useful.
+To test your code locally:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -e .
+python ros2_mcp/server.py --demo-sim
+```
 
-### Pull Requests
-1.  Fork the repo.
-2.  Create a new branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+## Pull Request Process
 
-## 📜 Code of Conduct
-Please be respectful and professional in all interactions.
-
-## 👤 Author
-**Engineer Abdullah Bin Zafar**
-- GitHub: [@EngineerAbdullahBinZafar](https://github.com/EngineerAbdullahBinZafar)
+1. **Fork & Branch**: Fork the repository and create a descriptive branch name (e.g. `feat/new-mcp-tool`).
+2. **Strict Linting**: We use `ruff` to ensure absolute codebase integrity. Before committing, run:
+   ```bash
+   python -m ruff check . --fix
+   python -m ruff format .
+   ```
+3. **Tests**: Ensure the 38-test suite passes via `python run_tests.py`.
+4. **Submit PR**: Use our provided PR template to explain your changes. We will review your PR within 2-3 business days.
