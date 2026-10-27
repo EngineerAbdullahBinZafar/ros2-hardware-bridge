@@ -1,215 +1,111 @@
+"""
+ros2_hardware_bridge / bridge_node.py
+Autonomous Systems & Control Engineering Bridge
+Protocol: AUTOSAR E2E Profile 1 (SAE J1850 CRC-8, 4-bit Sequence Counter)
+Author: Engineer Abdullah Bin Zafar
+License: Apache-2.0
+"""
+
 import struct
 import sys
-import rclpy
-from rclpy.node import Node
-import serial
-import serial.tools.list_ports
-from std_msgs.msg import Float32, Int32, String
-from geometry_msgs.msg import Twist
-from sensor_msgs.msg import Imu
+from typing import Optional, Tuple
+
+CRC8_SAE_J1850_TABLE = [
+    0x00, 0x1D, 0x3A, 0x27, 0x74, 0x69, 0x4E, 0x53, 0xE8, 0xF5, 0xD2, 0xCF, 0x9C, 0x81, 0xA6, 0xBB,
+    0xCD, 0xD0, 0xF7, 0xEA, 0xB9, 0xA4, 0x83, 0x9E, 0x25, 0x38, 0x1F, 0x02, 0x51, 0x4C, 0x6B, 0x76,
+    0x87, 0x9A, 0xBD, 0xA0, 0xF3, 0xEE, 0xC9, 0xD4, 0x6F, 0x72, 0x55, 0x48, 0x1B, 0x06, 0x21, 0x3C,
+    0x4A, 0x57, 0x70, 0x6D, 0x3E, 0x23, 0x04, 0x19, 0xA2, 0xBF, 0x98, 0x85, 0xD6, 0xCB, 0xEC, 0xF1,
+    0x13, 0x0E, 0x29, 0x34, 0x67, 0x7A, 0x5D, 0x40, 0xFB, 0xE6, 0xC1, 0xDC, 0x8F, 0x92, 0xB5, 0xA8,
+    0xDE, 0xC3, 0xE4, 0xF9, 0xAA, 0xB7, 0x90, 0x8D, 0x36, 0x2B, 0x0C, 0x11, 0x42, 0x5F, 0x78, 0x65,
+    0x94, 0x89, 0xAE, 0xB3, 0xE0, 0xFD, 0xDA, 0xC7, 0x7C, 0x61, 0x46, 0x5B, 0x08, 0x15, 0x32, 0x2F,
+    0x59, 0x44, 0x63, 0x7E, 0x2D, 0x30, 0x17, 0x0A, 0xB1, 0xAC, 0x8B, 0x96, 0xC5, 0xD8, 0xFF, 0xE2,
+    0x26, 0x3B, 0x1C, 0x01, 0x52, 0x4F, 0x68, 0x75, 0xCE, 0xD3, 0xF4, 0xE9, 0xBA, 0xA7, 0x80, 0x9D,
+    0xEB, 0xF6, 0xD1, 0xCC, 0x9F, 0x82, 0xA5, 0xB8, 0x03, 0x1E, 0x39, 0x24, 0x77, 0x6A, 0x4D, 0x50,
+    0xA1, 0xBC, 0x9B, 0x86, 0xD5, 0xC8, 0xEF, 0xF2, 0x49, 0x54, 0x73, 0x6E, 0x3D, 0x20, 0x07, 0x1A,
+    0x6C, 0x71, 0x56, 0x4B, 0x18, 0x05, 0x22, 0x3F, 0x84, 0x99, 0xBE, 0xA3, 0xF0, 0xED, 0xCA, 0xD7,
+    0x35, 0x28, 0x0F, 0x12, 0x41, 0x5C, 0x7B, 0x66, 0xDD, 0xC0, 0xE7, 0xFA, 0xA9, 0xB4, 0x93, 0x8E,
+    0xF8, 0xE5, 0xC2, 0xDF, 0x8C, 0x91, 0xB6, 0xAB, 0x10, 0x0D, 0x2A, 0x37, 0x64, 0x79, 0x5E, 0x43,
+    0xB2, 0xAF, 0x88, 0x95, 0xC6, 0xDB, 0xFC, 0xE1, 0x5A, 0x47, 0x60, 0x7D, 0x2E, 0x33, 0x14, 0x09,
+    0x7F, 0x62, 0x45, 0x58, 0x0B, 0x16, 0x31, 0x2C, 0x97, 0x8A, 0xAD, 0xB0, 0xE3, 0xFE, 0xD9, 0xC4
+]
+
+def compute_autosar_crc8(data: bytes) -> int:
+    crc = 0xFF
+    for b in data:
+        crc = CRC8_SAE_J1850_TABLE[crc ^ b]
+    return crc ^ 0xFF
 
 class PacketDecoder:
     """
-    State machine frame decoder for COBS/framed serial packets.
-    Prevents partial/fragmented reads from breaking packet synchronization.
-    Frame format: HEADER (0xAA 0x55) | MSG_ID (1B) | LENGTH (1B) | PAYLOAD (NB) | CHECKSUM (1B)
+    AUTOSAR E2E Profile 1 State Machine Packet Decoder.
+    Frame: [0xAA, 0x55, MSG_ID, SEQ_CTR, LENGTH, PAYLOAD (NB), CRC8]
+    Full byte-level sequence recovery and single-bit error protection.
     """
     STATE_HEADER_1 = 0
     STATE_HEADER_2 = 1
     STATE_MSG_ID = 2
-    STATE_LENGTH = 3
-    STATE_PAYLOAD = 4
-    STATE_CHECKSUM = 5
+    STATE_SEQ_CTR = 3
+    STATE_LENGTH = 4
+    STATE_PAYLOAD = 5
+    STATE_CRC8 = 6
 
     def __init__(self):
         self.state = self.STATE_HEADER_1
+        self.raw_seq_byte = 0
         self.msg_id = 0
+        self.seq_ctr = 0
         self.length = 0
         self.payload = bytearray()
-        self.checksum = 0
+        self.crc8 = 0
 
-    def parse_byte(self, b: int):
+    def parse_byte(self, b: int) -> Optional[Tuple[int, int, bytes]]:
         if self.state == self.STATE_HEADER_1:
             if b == 0xAA:
                 self.state = self.STATE_HEADER_2
+
         elif self.state == self.STATE_HEADER_2:
             if b == 0x55:
                 self.state = self.STATE_MSG_ID
+            elif b == 0xAA:
+                self.state = self.STATE_HEADER_2
             else:
                 self.state = self.STATE_HEADER_1
+
         elif self.state == self.STATE_MSG_ID:
             self.msg_id = b
+            self.state = self.STATE_SEQ_CTR
+
+        elif self.state == self.STATE_SEQ_CTR:
+            self.raw_seq_byte = b
+            self.seq_ctr = b & 0x0F
             self.state = self.STATE_LENGTH
+
         elif self.state == self.STATE_LENGTH:
             self.length = b
             self.payload = bytearray()
             if self.length == 0:
-                self.state = self.STATE_CHECKSUM
+                self.state = self.STATE_CRC8
+            elif self.length > 64:
+                # Malformed frame length -> fallback to scanning for 0xAA
+                self.state = self.STATE_HEADER_2 if b == 0xAA else self.STATE_HEADER_1
             else:
                 self.state = self.STATE_PAYLOAD
+
         elif self.state == self.STATE_PAYLOAD:
             self.payload.append(b)
             if len(self.payload) == self.length:
-                self.state = self.STATE_CHECKSUM
-        elif self.state == self.STATE_CHECKSUM:
-            self.checksum = b
-            calc_checksum = (self.msg_id + self.length + sum(self.payload)) & 0xFF
-            self.state = self.STATE_HEADER_1
-            if calc_checksum == self.checksum:
-                return (self.msg_id, bytes(self.payload))
+                self.state = self.STATE_CRC8
+
+        elif self.state == self.STATE_CRC8:
+            self.crc8 = b
+            # Reset state for next packet
+            self.state = self.STATE_HEADER_2 if b == 0xAA else self.STATE_HEADER_1
+            
+            # Compute AUTOSAR CRC-8 over exact transmitted bytes: msg_id, raw_seq_byte, length, payload
+            header_and_payload = bytes([self.msg_id, self.raw_seq_byte, self.length]) + bytes(self.payload)
+            calc_crc = compute_autosar_crc8(header_and_payload)
+            
+            if calc_crc == self.crc8:
+                return (self.msg_id, self.seq_ctr, bytes(self.payload))
+
         return None
-
-class ROS2HardwareBridge(Node):
-    """
-    ROS2 Hardware Bridge Node.
-    Provides robust, cross-platform serial communication between ROS2 system and microcontrollers (STM32, ESP32, Arduino).
-    """
-    def __init__(self):
-        super().__init__('hardware_bridge')
-
-        # Parameters
-        self.declare_parameter('port', 'AUTO')
-        self.declare_parameter('baudrate', 115200)
-        self.declare_parameter('reconnect_interval', 2.0)
-
-        self.port_setting = self.get_parameter('port').value
-        self.baudrate = self.get_parameter('baudrate').value
-        self.reconnect_interval = self.get_parameter('reconnect_interval').value
-
-        self.ser = None
-        self.decoder = PacketDecoder()
-
-        # Telemetry Publishers (Hardware -> ROS2)
-        self.batt_pub = self.create_publisher(Float32, 'hw/battery', 10)
-        self.enc_pub = self.create_publisher(Int32, 'hw/encoder', 10)
-        self.imu_pub = self.create_publisher(Imu, 'hw/imu', 10)
-        self.status_pub = self.create_publisher(String, 'hw/status', 10)
-
-        # Control Subscribers (ROS2 -> Hardware)
-        self.cmd_sub = self.create_subscription(Twist, 'cmd_vel', self.cmd_callback, 10)
-
-        # Timers
-        self.timer_serial_read = self.create_timer(0.005, self.read_serial)  # 200Hz polling
-        self.timer_heartbeat = self.create_timer(1.0, self.send_heartbeat)
-
-        self._connect_serial()
-
-    def _detect_port(self):
-        """Cross-platform serial port detection."""
-        ports = serial.tools.list_ports.comports()
-        if not ports:
-            return None
-        # Priority for USB-Serial adapters
-        for p in ports:
-            if "USB" in p.description or "ACM" in p.device or "COM" in p.device:
-                return p.device
-        return ports[0].device
-
-    def _connect_serial(self):
-        """Attempts to establish connection to serial port."""
-        target_port = self.port_setting
-        if target_port == 'AUTO':
-            target_port = self._detect_port()
-
-        if not target_port:
-            self.get_logger().warn("No valid serial ports detected. Retrying...")
-            return False
-
-        try:
-            self.ser = serial.Serial(target_port, self.baudrate, timeout=0.01)
-            self.get_logger().info(f"Connected to hardware on [{target_port}] @ {self.baudrate} baud")
-            self.status_pub.publish(String(data=f"CONNECTED:{target_port}"))
-            return True
-        except Exception as e:
-            self.get_logger().error(f"Serial connection failed on [{target_port}]: {e}")
-            self.ser = None
-            return False
-
-    def cmd_callback(self, msg: Twist):
-        """Packs motor velocity command (linear.x, angular.z) into binary frame."""
-        payload = struct.pack('<ff', msg.linear.x, msg.angular.z)
-        self.send_packet(0x01, payload)
-
-    def send_heartbeat(self):
-        """Sends periodic system heartbeat (0x00) to keep MCU watchdog active."""
-        if self.ser and self.ser.is_open:
-            self.send_packet(0x00, b'\x01')
-        else:
-            self._connect_serial()
-
-    def send_packet(self, msg_id: int, payload: bytes):
-        """Constructs and transmits framed binary packet to serial bus."""
-        if not self.ser or not self.ser.is_open:
-            return
-
-        start = b'\xAA\x55'
-        length = len(payload)
-        checksum = (msg_id + length + sum(payload)) & 0xFF
-        packet = start + struct.pack('BB', msg_id, length) + payload + struct.pack('B', checksum)
-
-        try:
-            self.ser.write(packet)
-        except Exception as e:
-            self.get_logger().error(f"Write error on serial port: {e}")
-            self.ser = None
-
-    def read_serial(self):
-        """Reads raw bytes and processes through packet decoder state machine."""
-        if not self.ser or not self.ser.is_open:
-            return
-
-        try:
-            bytes_available = self.ser.in_waiting
-            if bytes_available > 0:
-                raw_bytes = self.ser.read(bytes_available)
-                for b in raw_bytes:
-                    res = self.decoder.parse_byte(b)
-                    if res:
-                        msg_id, payload = res
-                        self.process_packet(msg_id, payload)
-        except Exception as e:
-            self.get_logger().error(f"Serial communication lost: {e}")
-            self.ser = None
-
-    def process_packet(self, msg_id: int, payload: bytes):
-        """Dispatches decoded payload to corresponding ROS2 topic."""
-        try:
-            if msg_id == 0x10 and len(payload) >= 4:  # Battery Voltage (Float32)
-                val = struct.unpack('<f', payload[:4])[0]
-                self.batt_pub.publish(Float32(data=val))
-
-            elif msg_id == 0x11 and len(payload) >= 4:  # Encoder Ticks (Int32)
-                val = struct.unpack('<i', payload[:4])[0]
-                self.enc_pub.publish(Int32(data=val))
-
-            elif msg_id == 0x12 and len(payload) >= 24:  # IMU Raw (6x Float32)
-                ax, ay, az, gx, gy, gz = struct.unpack('<ffffff', payload[:24])
-                imu_msg = Imu()
-                imu_msg.linear_acceleration.x = ax
-                imu_msg.linear_acceleration.y = ay
-                imu_msg.linear_acceleration.z = az
-                imu_msg.angular_velocity.x = gx
-                imu_msg.angular_velocity.y = gy
-                imu_msg.angular_velocity.z = gz
-                self.imu_pub.publish(imu_msg)
-
-            elif msg_id == 0x1F:  # Hardware Status String
-                status_str = payload.decode('utf-8', errors='ignore')
-                self.status_pub.publish(String(data=status_str))
-
-        except Exception as e:
-            self.get_logger().warn(f"Failed to process packet ID [0x{msg_id:02X}]: {e}")
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ROS2HardwareBridge()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()

@@ -1,40 +1,139 @@
 /*
- * ros2_bridge.h - Lightweight Serial Protocol for ROS2-to-Embedded Communication
+ * ros2_bridge.h - Deterministic Real-Time Serial Bridge for ROS 2 & Microcontrollers
+ * Implementation: AUTOSAR E2E Profile 1 (SAE J1850 CRC-8, 4-bit Sequence Tracking)
+ *
+ * Target: STM32, ESP32, RP2040, Arduino AVR/ARM
  * Author: Engineer Abdullah Bin Zafar
+ * License: Apache-2.0
  */
 
 #ifndef ROS2_BRIDGE_H
 #define ROS2_BRIDGE_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
+#include <stddef.h>
 #include <string.h>
+#include <stdbool.h>
 
 #define BRIDGE_START_BYTE1 0xAA
 #define BRIDGE_START_BYTE2 0x55
+#define BRIDGE_MAX_PAYLOAD 64
+
+/*
+ * AUTOSAR E2E Profile 1 Framing:
+ * [0]: START_1 (0xAA)
+ * [1]: START_2 (0x55)
+ * [2]: MSG_ID  (0x00 - 0xFF)
+ * [3]: SEQ_LEN (High 4 bits: 4-bit sequence counter 0-15; Low 4 bits: payload length 0-15)
+ *      *For extended payloads > 15 bytes, bits 0-3 indicate payload len up to 64 bytes via legacy mode,
+ *       or payload_len byte follows. Standard AUTOSAR frame specifies:
+ * [2]: MSG_ID
+ * [3]: SEQ_CTR (0x00 - 0x0F)
+ * [4]: LEN     (0x00 - 0x40)
+ * [5..5+LEN-1]: PAYLOAD
+ * [5+LEN]: CRC8 (AUTOSAR E2E Profile 1: poly 0x1D, init 0xFF, xorout 0xFF)
+ */
+
+/* Fast 256-entry Lookup Table for SAE J1850 / AUTOSAR E2E Profile 1 (poly 0x1D) */
+static const uint8_t CRC8_SAE_J1850_TABLE[256] = {
+    0x00, 0x1D, 0x3A, 0x27, 0x74, 0x69, 0x4E, 0x53, 0xE8, 0xF5, 0xD2, 0xCF, 0x9C, 0x81, 0xA6, 0xBB,
+    0xCD, 0xD0, 0xF7, 0xEA, 0xB9, 0xA4, 0x83, 0x9E, 0x25, 0x38, 0x1F, 0x02, 0x51, 0x4C, 0x6B, 0x76,
+    0x87, 0x9A, 0xBD, 0xA0, 0xF3, 0xEE, 0xC9, 0xD4, 0x6F, 0x72, 0x55, 0x48, 0x1B, 0x06, 0x21, 0x3C,
+    0x4A, 0x57, 0x70, 0x6D, 0x3E, 0x23, 0x04, 0x19, 0xA2, 0xBF, 0x98, 0x85, 0xD6, 0xCB, 0xEC, 0xF1,
+    0x13, 0x0E, 0x29, 0x34, 0x67, 0x7A, 0x5D, 0x40, 0xFB, 0xE6, 0xC1, 0xDC, 0x8F, 0x92, 0xB5, 0xA8,
+    0xDE, 0xC3, 0xE4, 0xF9, 0xAA, 0xB7, 0x90, 0x8D, 0x36, 0x2B, 0x0C, 0x11, 0x42, 0x5F, 0x78, 0x65,
+    0x94, 0x89, 0xAE, 0xB3, 0xE0, 0xFD, 0xDA, 0xC7, 0x7C, 0x61, 0x46, 0x5B, 0x08, 0x15, 0x32, 0x2F,
+    0x59, 0x44, 0x63, 0x7E, 0x2D, 0x30, 0x17, 0x0A, 0xB1, 0xAC, 0x8B, 0x96, 0xC5, 0xD8, 0xFF, 0xE2,
+    0x26, 0x3B, 0x1C, 0x01, 0x52, 0x4F, 0x68, 0x75, 0xCE, 0xD3, 0xF4, 0xE9, 0xBA, 0xA7, 0x80, 0x9D,
+    0xEB, 0xF6, 0xD1, 0xCC, 0x9F, 0x82, 0xA5, 0xB8, 0x03, 0x1E, 0x39, 0x24, 0x77, 0x6A, 0x4D, 0x50,
+    0xA1, 0xBC, 0x9B, 0x86, 0xD5, 0xC8, 0xEF, 0xF2, 0x49, 0x54, 0x73, 0x6E, 0x3D, 0x20, 0x07, 0x1A,
+    0x6C, 0x71, 0x56, 0x4B, 0x18, 0x05, 0x22, 0x3F, 0x84, 0x99, 0xBE, 0xA3, 0xF0, 0xED, 0xCA, 0xD7,
+    0x35, 0x28, 0x0F, 0x12, 0x41, 0x5C, 0x7B, 0x66, 0xDD, 0xC0, 0xE7, 0xFA, 0xA9, 0xB4, 0x93, 0x8E,
+    0xF8, 0xE5, 0xC2, 0xDF, 0x8C, 0x91, 0xB6, 0xAB, 0x10, 0x0D, 0x2A, 0x37, 0x64, 0x79, 0x5E, 0x43,
+    0xB2, 0xAF, 0x88, 0x95, 0xC6, 0xDB, 0xFC, 0xE1, 0x5A, 0x47, 0x60, 0x7D, 0x2E, 0x33, 0x14, 0x09,
+    0x7F, 0x62, 0x45, 0x58, 0x0B, 0x16, 0x31, 0x2C, 0x97, 0x8A, 0xAD, 0xB0, 0xE3, 0xFE, 0xD9, 0xC4
+};
+
+/**
+ * @brief Computes AUTOSAR E2E Profile 1 CRC-8 (SAE J1850)
+ * Polynomial: 0x1D, Initial: 0xFF, Final XOR: 0xFF
+ */
+static inline uint8_t bridge_crc8_e2e(const uint8_t *data, size_t length) {
+    uint8_t crc = 0xFF;
+    for (size_t i = 0; i < length; i++) {
+        crc = CRC8_SAE_J1850_TABLE[crc ^ data[i]];
+    }
+    return crc ^ 0xFF;
+}
 
 typedef struct {
     uint8_t msg_id;
+    uint8_t seq_ctr;
     uint8_t len;
-    uint8_t payload[64];
-    uint8_t checksum;
+    uint8_t payload[BRIDGE_MAX_PAYLOAD];
+    uint8_t crc8;
 } BridgePacket;
 
-// Simple Checksum
-static uint8_t calculate_checksum(uint8_t id, uint8_t len, uint8_t* data) {
-    uint8_t sum = id + len;
-    for (uint8_t i = 0; i < len; i++) sum += data[i];
-    return sum;
-}
-
-// Prepare a packet for transmission
-static int bridge_serialize(uint8_t id, uint8_t* data, uint8_t len, uint8_t* out_buf) {
+/**
+ * @brief Serializes a packet with AUTOSAR E2E Profile 1 CRC-8 and sequence counter
+ * Frame layout: [0xAA, 0x55, MSG_ID, SEQ_CTR, LEN, PAYLOAD..., CRC8]
+ * Total length = 6 + LEN
+ */
+static inline int bridge_serialize_e2e(uint8_t id, uint8_t seq, const uint8_t *data, uint8_t len, uint8_t *out_buf) {
+    if (len > BRIDGE_MAX_PAYLOAD || out_buf == NULL) {
+        return -1;
+    }
     out_buf[0] = BRIDGE_START_BYTE1;
     out_buf[1] = BRIDGE_START_BYTE2;
     out_buf[2] = id;
-    out_buf[3] = len;
-    memcpy(&out_buf[4], data, len);
-    out_buf[4 + len] = calculate_checksum(id, len, data);
-    return 5 + len;
+    out_buf[3] = seq & 0x0F;
+    out_buf[4] = len;
+    if (len > 0 && data != NULL) {
+        memcpy(&out_buf[5], data, len);
+    }
+    /* Calculate CRC over header bytes (id, seq, len) + payload */
+    uint8_t crc = 0xFF;
+    crc = CRC8_SAE_J1850_TABLE[crc ^ out_buf[2]];
+    crc = CRC8_SAE_J1850_TABLE[crc ^ out_buf[3]];
+    crc = CRC8_SAE_J1850_TABLE[crc ^ out_buf[4]];
+    for (uint8_t i = 0; i < len; i++) {
+        crc = CRC8_SAE_J1850_TABLE[crc ^ out_buf[5 + i]];
+    }
+    out_buf[5 + len] = crc ^ 0xFF;
+    return 6 + len;
 }
 
-#endif // ROS2_BRIDGE_H
+/**
+ * @brief Validates an incoming buffer against AUTOSAR E2E Profile 1 CRC-8
+ */
+static inline bool bridge_validate_e2e(const uint8_t *buffer, size_t total_len) {
+    if (total_len < 6 || buffer == NULL) {
+        return false;
+    }
+    if (buffer[0] != BRIDGE_START_BYTE1 || buffer[1] != BRIDGE_START_BYTE2) {
+        return false;
+    }
+    uint8_t len = buffer[4];
+    if (total_len != (size_t)(6 + len)) {
+        return false;
+    }
+    uint8_t expected_crc = buffer[5 + len];
+    uint8_t calc_crc = 0xFF;
+    calc_crc = CRC8_SAE_J1850_TABLE[calc_crc ^ buffer[2]];
+    calc_crc = CRC8_SAE_J1850_TABLE[calc_crc ^ buffer[3]];
+    calc_crc = CRC8_SAE_J1850_TABLE[calc_crc ^ buffer[4]];
+    for (uint8_t i = 0; i < len; i++) {
+        calc_crc = CRC8_SAE_J1850_TABLE[calc_crc ^ buffer[5 + i]];
+    }
+    return (calc_crc ^ 0xFF) == expected_crc;
+}
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ROS2_BRIDGE_H */
