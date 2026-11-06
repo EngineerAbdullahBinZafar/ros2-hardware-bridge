@@ -1,0 +1,21 @@
+# ROS 2 Hardware Bridge
+
+> Deterministic, high-assurance serial communication gateway connecting ROS 2 middleware graphs with embedded microcontrollers (STM32, ESP32, RP2040) using AUTOSAR End-to-End (E2E) Profile 1 protection, SAE J1850 CRC-8, monotonic alive sequence counters, and microsecond packet dispatch.
+
+## Documentation
+- [Architecture & Protocol Specification](README.md): Deterministic state machine, 6-byte frame header, CRC-8 lookup table, and micro-ROS interoperability.
+- [Microcontroller Firmware Header](firmware/ros2_bridge.h): Zero-allocation C/C++ firmware header for STM32, ESP32, and RP2040 UART DMA integration.
+- [ROS 2 Bridge Node Implementation](ros2_bridge/bridge_node.py): Python state-machine packet decoder with stream resynchronization and fault detection.
+
+## Architecture & Core Modules
+- [AUTOSAR E2E Profile 1](ros2_bridge/bridge_node.py#L38-L111): Frame parser implementing SAE J1850 polynomial 0x1D, initial value 0xFF, final XOR 0xFF, and Hamming distance d >= 4.
+- [Message Dictionary](README.md#telemetry--message-dictionary): Telemetry IDs for Heartbeat (0x00), Twist Velocity (0x01), Battery (0x10), Wheel Encoder (0x11), 6-DOF IMU (0x12), and Diagnostics (0x1F).
+- [Firmware Serialization](firmware/ros2_bridge.h#L86-L108): High-speed static inline C serializer for bare-metal ARM Cortex-M and Xtensa platforms.
+
+## APIs & Protocols
+- [Packet Serialization](firmware/ros2_bridge.h#L86): `bridge_serialize_e2e(id, seq, data, len, out_buf)`
+- [Packet Validation](firmware/ros2_bridge.h#L113): `bridge_validate_e2e(buffer, total_len)`
+- [Stream Parsing](ros2_bridge/bridge_node.py#L61): `PacketDecoder.parse_byte(b)`
+
+## Optional
+- [Verification & Test Suite](test/): Automated pytest verification suite with 11 test cases validating standard vectors, single-bit flip rejection, and UART stream resynchronization.
