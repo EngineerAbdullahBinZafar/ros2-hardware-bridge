@@ -15,6 +15,11 @@
 "Bridging the divide between high-level ROS 2 computational graphs and deterministic bare-metal firmware."
 ```
 
+```bash
+# ⚡ 1-Command Live Terminal Demonstration (Zero Dependencies)
+python demo.py
+```
+
 [Executive Overview](#-executive-overview) • [Mathematical Formulations](#-mathematical-formulations--error-bounds) • [Frame Architecture](#-autosar-e2e-profile-1-frame-architecture) • [Message Dictionary](#-telemetry--message-dictionary) • [Firmware Integration](#%EF%B8%8F-microcontroller-firmware-integration-cc) • [Verification](#-verification--empirical-test-suite)
 
 </div>
