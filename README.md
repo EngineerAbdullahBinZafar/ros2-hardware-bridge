@@ -1,5 +1,9 @@
 <div align="center">
 
+<p align="center">
+  <img src="assets/banner.png" alt="ROS 2 Hardware Bridge — Deterministic AUTOSAR E2E Profile 1 Real-Time Serial Bridge for Embedded Microcontrollers by Engineer Abdullah Bin Zafar" width="100%" />
+</p>
+
 # 🔌 ROS 2 Hardware Bridge
 ### **Deterministic AUTOSAR E2E Profile 1 Real-Time Serial Bridge for Embedded Microcontrollers**
 *Aerospace & Automotive Grade Communication · ISO 26262 ASIL-D Error Detection · STM32 · ESP32 · RP2040*
