@@ -8,9 +8,10 @@
 ### **Deterministic AUTOSAR E2E Profile 1 Real-Time Serial Bridge for Embedded Microcontrollers**
 *Aerospace & Automotive Grade Communication · ISO 26262 ASIL-D Error Detection · STM32 · ESP32 · RP2040*
 
-[![CI Build & Test](https://img.shields.io/badge/CI-Passing%20(11%2F11%20Tests)-00d4ff?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge)
-[![Safety Profile](https://img.shields.io/badge/AUTOSAR%20E2E-Profile%201%20(CRC--8)-7b61ff?style=for-the-badge&logo=shield&logoColor=white)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge)
-[![Latency](https://img.shields.io/badge/Frame%20Processing-%3C35%20%C2%B5s-10b981?style=for-the-badge&logo=speedtest&logoColor=white)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge)
+[![CI Status](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/actions/workflows/ci.yml)
+[![Language](https://img.shields.io/badge/Core-C11%20%7C%20C%2B%2B17%20%7C%20Python-00599C?style=for-the-badge&logo=c&logoColor=white)](CMakeLists.txt)
+[![Safety Profile](https://img.shields.io/badge/AUTOSAR%20E2E-Profile%201%20(CRC--8)-7b61ff?style=for-the-badge&logo=shield&logoColor=white)](firmware/include/ros2_bridge_fsm.h)
+[![Latency](https://img.shields.io/badge/Frame%20Processing-%3C35%20%C2%B5s-10b981?style=for-the-badge&logo=speedtest&logoColor=white)](docs/assets/stm32_uart_can_topology.svg)
 [![License](https://img.shields.io/badge/License-Apache%202.0-f59e0b?style=for-the-badge)](LICENSE)
 
 ---
@@ -177,6 +178,14 @@ $$\text{Frame Status} = \begin{cases}
 
 ---
 
+## 🔌 Hardware Wiring Topology & Isolation Schematic
+
+<p align="center">
+  <img src="docs/assets/stm32_uart_can_topology.svg" width="100%" alt="STM32F407VG Hardware Wiring Topology: ADuM1201 Galvanic Isolator, 921.6 kbps DMA UART, SN65HVD230 CAN Bus & Hardware E-Stop Relay"/>
+</p>
+
+---
+
 ## 📐 AUTOSAR E2E Profile 1 Frame Architecture
 
 ```
@@ -256,9 +265,17 @@ void USART2_IRQHandler(void) {
 
 ---
 
-## 🧪 Verification & Empirical Test Suite
+## 🧪 Verification & Empirical Test Suite (C11, C++17 & Python)
 
-The test suite validates standard vectors, single-bit flip rejection (Hamming distance guarantee), fragmented stream reassembly, and message decoding.
+Compile and test the zero-heap C11 7-state FSM driver, SPSC DMA ring buffer, COBS codec, and C++17 ROS 2 host codec with AddressSanitizer + UBSan enabled:
+
+```bash
+mkdir build && cd build
+cmake .. && make -j$(nproc)
+ctest --output-on-failure
+```
+
+And run the Python simulation test suite (11/11 tests):
 
 ```bash
 uv run --with pytest pytest -o pythonpath=. test/ -v
@@ -284,56 +301,6 @@ test/test_bridge_node.py::test_packet_decoder_fragmented_stream PASSED   [100%]
 
 ============================= 11 passed in 0.11s ==============================
 ```
-
----
-
-<details>
-<summary>📋 Machine-Readable Metadata (Schema.org JSON-LD)</summary>
-
-```json
-{
-  "@context": "https://schema.org",
-  "@type": "SoftwareSourceCode",
-  "name": "ros2-hardware-bridge",
-  "version": "1.0.0",
-  "description": "Deterministic AUTOSAR E2E Profile 1 real-time serial communication bridge connecting ROS 2 nodes with STM32, ESP32, and RP2040 microcontrollers with SAE J1850 CRC-8 and Hamming distance d >= 4.",
-  "author": {
-    "@type": "Person",
-    "name": "Engineer Abdullah Bin Zafar",
-    "email": "abz.king.1.9.2003@gmail.com",
-    "affiliation": {
-      "@type": "EducationalOrganization",
-      "name": "University of Engineering and Technology (UET) Lahore"
-    },
-    "sameAs": "https://github.com/EngineerAbdullahBinZafar"
-  },
-  "license": "https://opensource.org/licenses/Apache-2.0",
-  "codeRepository": "https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge",
-  "programmingLanguage": [
-    "C",
-    "C++",
-    "Python"
-  ],
-  "applicationCategory": "EmbeddedRoboticsMiddleware",
-  "operatingSystem": "Cross-Platform (Linux, Windows, Bare-Metal Microcontrollers)",
-  "keywords": [
-    "ros2",
-    "autosar-e2e",
-    "crc-8",
-    "sae-j1850",
-    "serial-bridge",
-    "micro-ros",
-    "stm32",
-    "esp32",
-    "rp2040",
-    "deterministic-communication",
-    "iso-26262",
-    "embedded-systems"
-  ]
-}
-```
-
-</details>
 
 ---
 
