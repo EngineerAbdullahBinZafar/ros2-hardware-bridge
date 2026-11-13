@@ -24,6 +24,8 @@ extern "C" {
 #define E2E_SYNC_BYTE_2     0x55U
 #define E2E_MAX_PAYLOAD     64U
 #define E2E_FRAME_OVERHEAD  6U
+#define E2E_MAX_FRAME_SIZE  (E2E_FRAME_OVERHEAD + E2E_MAX_PAYLOAD)
+#define E2E_COBS_MAX_FRAME  (E2E_MAX_FRAME_SIZE + 2U)
 #define E2E_RING_CAPACITY   512U
 
 /**
@@ -35,7 +37,8 @@ typedef enum {
     E2E_STATUS_REPEATED,        /**< Duplicate alive counter (delta_S == 15) */
     E2E_STATUS_WRONG_SEQUENCE,  /**< Packet loss detected within max delta window */
     E2E_STATUS_CRC_ERROR,       /**< SAE J1850 CRC-8 mismatch */
-    E2E_STATUS_FRAME_ERROR      /**< Length bounds violation */
+    E2E_STATUS_FRAME_ERROR,     /**< Length bounds or COBS framing violation */
+    E2E_STATUS_DESYNC           /**< Sequence gap exceeded max_delta_counter */
 } e2e_rx_status_t;
 
 /**
@@ -100,11 +103,18 @@ typedef struct {
     bool                   seq_initialized;
     uint8_t                last_seq_ctr;
     uint8_t                max_delta_counter;
+    bool                   use_data_id;
+    uint16_t               data_id;
+    uint8_t                cobs_buf[E2E_COBS_MAX_FRAME];
+    size_t                 cobs_idx;
+    bool                   cobs_overflow;
     bridge_diag_counters_t diag;
     bridge_ringbuf_t       rx_ring;
 } bridge_parser_ctx_t;
 
 void bridge_parser_init(bridge_parser_ctx_t *ctx, uint8_t max_delta_counter);
+void bridge_parser_init_e2e(bridge_parser_ctx_t *ctx, uint8_t max_delta_counter, uint16_t data_id);
+void bridge_parser_set_data_id(bridge_parser_ctx_t *ctx, uint16_t data_id);
 void bridge_parser_reset(bridge_parser_ctx_t *ctx);
 
 /**
@@ -144,6 +154,45 @@ size_t bridge_cobs_encode(const uint8_t *input, size_t len, uint8_t *output, siz
  * @return Decoded length, or 0 on malformed framing.
  */
 size_t bridge_cobs_decode(const uint8_t *input, size_t len, uint8_t *output, size_t out_cap);
+
+/**
+ * @brief Serialize an E2E frame, COBS-encode it, and append trailing 0x00 delimiter.
+ * @return Total encoded wire length (including trailing 0x00), or 0 on error.
+ */
+size_t bridge_cobs_serialize_e2e(uint8_t id,
+                                 uint8_t seq,
+                                 const uint8_t *data,
+                                 uint8_t len,
+                                 uint8_t *out_buf,
+                                 size_t out_cap);
+
+/**
+ * @brief Serialize a Data-ID-authenticated E2E frame with COBS framing + 0x00 delimiter.
+ * @return Total encoded wire length (including trailing 0x00), or 0 on error.
+ */
+size_t bridge_cobs_serialize_e2e_with_data_id(uint16_t data_id,
+                                              uint8_t id,
+                                              uint8_t seq,
+                                              const uint8_t *data,
+                                              uint8_t len,
+                                              uint8_t *out_buf,
+                                              size_t out_cap);
+
+/**
+ * @brief Feed a single byte from a 0x00-delimited COBS UART stream.
+ * Accumulates encoded frame until 0x00 delimiter, calls bridge_cobs_decode(),
+ * and dispatches decoded bytes into bridge_parser_feed_byte().
+ */
+bool bridge_cobs_feed_byte(bridge_parser_ctx_t *ctx,
+                           uint8_t byte,
+                           bridge_decoded_frame_t *out_frame);
+
+/**
+ * @brief Drain RX DMA ring buffer using COBS-framed E2E decoding.
+ */
+size_t bridge_cobs_poll_ring(bridge_parser_ctx_t *ctx,
+                             bridge_decoded_frame_t *out_frames,
+                             size_t max_frames);
 
 #ifdef __cplusplus
 }

@@ -6,12 +6,12 @@
 
 # 🔌 ROS 2 Hardware Bridge
 ### **Deterministic AUTOSAR E2E Profile 1 Real-Time Serial Bridge for Embedded Microcontrollers**
-*Aerospace & Automotive Grade Communication · ISO 26262 ASIL-D Error Detection · STM32 · ESP32 · RP2040*
+*Aerospace & Automotive Grade Communication · AUTOSAR E2E Profile 1 Error Detection ($d_H \ge 4$) · STM32 · ESP32 · RP2040*
 
 [![CI Status](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/EngineerAbdullahBinZafar/ros2-hardware-bridge/actions/workflows/ci.yml)
 [![Language](https://img.shields.io/badge/Core-C11%20%7C%20C%2B%2B17%20%7C%20Python-00599C?style=for-the-badge&logo=c&logoColor=white)](CMakeLists.txt)
 [![Safety Profile](https://img.shields.io/badge/AUTOSAR%20E2E-Profile%201%20(CRC--8)-7b61ff?style=for-the-badge&logo=shield&logoColor=white)](firmware/include/ros2_bridge_fsm.h)
-[![Latency](https://img.shields.io/badge/Frame%20Processing-%3C35%20%C2%B5s-10b981?style=for-the-badge&logo=speedtest&logoColor=white)](docs/assets/stm32_uart_can_topology.svg)
+[![Design Budget](https://img.shields.io/badge/MCU%20Design%20Budget-%3C35%20%C2%B5s%20%40%20168MHz-10b981?style=for-the-badge&logo=speedtest&logoColor=white)](docs/assets/stm32_uart_can_topology.svg)
 [![License](https://img.shields.io/badge/License-Apache%202.0-f59e0b?style=for-the-badge)](LICENSE)
 
 ---
@@ -39,7 +39,7 @@ While generic robotics implementations rely on fragile newline-delimited ASCII s
 
 - **Hamming Distance $d_H \ge 4$:** Detects 100% of 1-bit, 2-bit, and 3-bit transmission corruptions, as well as burst errors up to 8 bits.
 - **Monotonic Alive Sequence Tracking:** Detects dropped, repeated, delayed, or out-of-order packets across lossy physical layers.
-- **Deterministic Microsecond Dispatch:** Fast 256-entry precomputed lookup table executes frame verification in $<35\,\mu\text{s}$ on an ARM Cortex-M4 at 168 MHz with zero dynamic heap allocation.
+- **Deterministic Lookup Dispatch:** Fast 256-entry precomputed lookup table with zero dynamic heap allocation (`<35\,\mu\text{s}` theoretical cycle budget on a 168 MHz ARM Cortex-M4; host C11/Python behavior verified by unit tests).
 - **Stream Auto-Resynchronization:** Recovers cleanly from garbage prefixes, noise spikes, and hot-plug UART disconnects without packet loss.
 - **micro-ROS Interoperability:** Operates as a lightweight transport alternative when micro-ROS client memory footprints exceed bare-metal MCU limits.
 
@@ -105,7 +105,7 @@ The residual undetected error probability under an independent channel bit error
 
 $$P_{\text{undetected}} \le \sum_{w=4}^{N_{\text{bits}}} A_w p_b^w (1 - p_b)^{N_{\text{bits}} - w} \approx A_4 p_b^4 + \mathcal{O}(p_b^5)$$
 
-For $p_b = 10^{-5}$ and $N_{\text{bits}} = 512$, $P_{\text{undetected}} < 10^{-18}$, fulfilling **ISO 26262 ASIL-D** functional safety requirements.
+For $p_b = 10^{-5}$ and $N_{\text{bits}} = 512$, $P_{\text{undetected}} < 10^{-18}$ under independent bit-error channel assumptions (the CRC-8 $d_H \ge 4$ coding-theory error-detection property used in AUTOSAR E2E Profile 1).
 
 ### 3. Consistent Overhead Byte Stuffing (COBS) Bound
 
@@ -275,10 +275,10 @@ cmake .. && make -j$(nproc)
 ctest --output-on-failure
 ```
 
-And run the Python simulation test suite (11/11 tests):
+And run the Python simulation test suite (`pytest`):
 
 ```bash
-uv run --with pytest pytest -o pythonpath=. test/ -v
+uv run --with pytest pytest test/ -v
 ```
 
 ```

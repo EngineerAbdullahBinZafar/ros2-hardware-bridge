@@ -70,6 +70,24 @@ static inline uint8_t bridge_crc8_e2e(const uint8_t *data, size_t length) {
     return crc ^ 0xFF;
 }
 
+/**
+ * @brief Computes AUTOSAR E2E Profile 1 CRC-8 including implicit 16-bit Data ID
+ *        (low byte followed by high byte) per AUTOSAR E2E Profile 1 (Both-Bytes mode).
+ */
+static inline uint8_t bridge_crc8_e2e_with_data_id(uint16_t data_id, const uint8_t *data, size_t length) {
+    uint8_t crc = 0xFF;
+    uint8_t id_lo = (uint8_t)(data_id & 0xFFU);
+    uint8_t id_hi = (uint8_t)((data_id >> 8) & 0xFFU);
+    crc = CRC8_SAE_J1850_TABLE[crc ^ id_lo];
+    crc = CRC8_SAE_J1850_TABLE[crc ^ id_hi];
+    if (data != NULL) {
+        for (size_t i = 0; i < length; i++) {
+            crc = CRC8_SAE_J1850_TABLE[crc ^ data[i]];
+        }
+    }
+    return crc ^ 0xFF;
+}
+
 typedef struct {
     uint8_t msg_id;
     uint8_t seq_ctr;
@@ -85,6 +103,9 @@ typedef struct {
  */
 static inline int bridge_serialize_e2e(uint8_t id, uint8_t seq, const uint8_t *data, uint8_t len, uint8_t *out_buf) {
     if (len > BRIDGE_MAX_PAYLOAD || out_buf == NULL) {
+        return -1;
+    }
+    if (len > 0 && data == NULL) {
         return -1;
     }
     out_buf[0] = BRIDGE_START_BYTE1;
@@ -108,6 +129,28 @@ static inline int bridge_serialize_e2e(uint8_t id, uint8_t seq, const uint8_t *d
 }
 
 /**
+ * @brief Serializes a packet with AUTOSAR E2E Profile 1 CRC-8 authenticating a 16-bit Data ID.
+ */
+static inline int bridge_serialize_e2e_with_data_id(uint16_t data_id, uint8_t id, uint8_t seq, const uint8_t *data, uint8_t len, uint8_t *out_buf) {
+    if (len > BRIDGE_MAX_PAYLOAD || out_buf == NULL) {
+        return -1;
+    }
+    if (len > 0 && data == NULL) {
+        return -1;
+    }
+    out_buf[0] = BRIDGE_START_BYTE1;
+    out_buf[1] = BRIDGE_START_BYTE2;
+    out_buf[2] = id;
+    out_buf[3] = seq & 0x0F;
+    out_buf[4] = len;
+    if (len > 0 && data != NULL) {
+        memcpy(&out_buf[5], data, len);
+    }
+    out_buf[5 + len] = bridge_crc8_e2e_with_data_id(data_id, &out_buf[2], (size_t)(3U + len));
+    return 6 + len;
+}
+
+/**
  * @brief Validates an incoming buffer against AUTOSAR E2E Profile 1 CRC-8
  */
 static inline bool bridge_validate_e2e(const uint8_t *buffer, size_t total_len) {
@@ -118,7 +161,7 @@ static inline bool bridge_validate_e2e(const uint8_t *buffer, size_t total_len) 
         return false;
     }
     uint8_t len = buffer[4];
-    if (total_len != (size_t)(6 + len)) {
+    if (len > BRIDGE_MAX_PAYLOAD || total_len != (size_t)(6 + len)) {
         return false;
     }
     uint8_t expected_crc = buffer[5 + len];
@@ -130,6 +173,25 @@ static inline bool bridge_validate_e2e(const uint8_t *buffer, size_t total_len) 
         calc_crc = CRC8_SAE_J1850_TABLE[calc_crc ^ buffer[5 + i]];
     }
     return (calc_crc ^ 0xFF) == expected_crc;
+}
+
+/**
+ * @brief Validates an incoming buffer against AUTOSAR E2E Profile 1 CRC-8 with 16-bit Data ID.
+ */
+static inline bool bridge_validate_e2e_with_data_id(uint16_t data_id, const uint8_t *buffer, size_t total_len) {
+    if (total_len < 6 || buffer == NULL) {
+        return false;
+    }
+    if (buffer[0] != BRIDGE_START_BYTE1 || buffer[1] != BRIDGE_START_BYTE2) {
+        return false;
+    }
+    uint8_t len = buffer[4];
+    if (len > BRIDGE_MAX_PAYLOAD || total_len != (size_t)(6 + len)) {
+        return false;
+    }
+    uint8_t expected_crc = buffer[5 + len];
+    uint8_t calc_crc = bridge_crc8_e2e_with_data_id(data_id, &buffer[2], (size_t)(3U + len));
+    return calc_crc == expected_crc;
 }
 
 #ifdef __cplusplus

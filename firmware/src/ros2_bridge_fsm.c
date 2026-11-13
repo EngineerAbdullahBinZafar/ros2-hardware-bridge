@@ -18,7 +18,29 @@ void bridge_parser_init(bridge_parser_ctx_t *ctx, uint8_t max_delta_counter)
     }
     memset(ctx, 0, sizeof(*ctx));
     ctx->fsm_state = FSM_WAIT_SYNC_1;
-    ctx->max_delta_counter = (max_delta_counter == 0U) ? 2U : max_delta_counter;
+    if (max_delta_counter == 0U) {
+        ctx->max_delta_counter = 2U;
+    } else if (max_delta_counter > 14U) {
+        ctx->max_delta_counter = 14U;
+    } else {
+        ctx->max_delta_counter = max_delta_counter;
+    }
+    ctx->running_crc = 0xFFU;
+}
+
+void bridge_parser_init_e2e(bridge_parser_ctx_t *ctx, uint8_t max_delta_counter, uint16_t data_id)
+{
+    bridge_parser_init(ctx, max_delta_counter);
+    bridge_parser_set_data_id(ctx, data_id);
+}
+
+void bridge_parser_set_data_id(bridge_parser_ctx_t *ctx, uint16_t data_id)
+{
+    if (ctx == NULL) {
+        return;
+    }
+    ctx->use_data_id = true;
+    ctx->data_id = data_id;
 }
 
 void bridge_parser_reset(bridge_parser_ctx_t *ctx)
@@ -48,9 +70,9 @@ static e2e_rx_status_t evaluate_sequence(bridge_parser_ctx_t *ctx,
 
     uint8_t expected = (uint8_t)((ctx->last_seq_ctr + 1U) & 0x0FU);
     uint8_t delta = (uint8_t)(((unsigned int)seq - (unsigned int)expected) & 0x0FU);
-    ctx->last_seq_ctr = seq;
 
     if (delta == 0U) {
+        ctx->last_seq_ctr = seq;
         ctx->diag.frames_valid++;
         return E2E_STATUS_OK;
     }
@@ -58,8 +80,15 @@ static e2e_rx_status_t evaluate_sequence(bridge_parser_ctx_t *ctx,
         ctx->diag.frames_repeated++;
         return E2E_STATUS_REPEATED;
     }
+
+    ctx->last_seq_ctr = seq;
     *out_lost = delta;
     ctx->diag.frames_seq_lost += delta;
+
+    if (delta > ctx->max_delta_counter) {
+        ctx->diag.resync_events++;
+        return E2E_STATUS_DESYNC;
+    }
     return E2E_STATUS_WRONG_SEQUENCE;
 }
 
@@ -81,6 +110,12 @@ bool bridge_parser_feed_byte(bridge_parser_ctx_t *ctx,
         case FSM_WAIT_SYNC_2:
             if (byte == E2E_SYNC_BYTE_2) {
                 ctx->running_crc = 0xFFU;
+                if (ctx->use_data_id) {
+                    uint8_t id_lo = (uint8_t)(ctx->data_id & 0xFFU);
+                    uint8_t id_hi = (uint8_t)((ctx->data_id >> 8) & 0xFFU);
+                    ctx->running_crc = CRC8_SAE_J1850_TABLE[ctx->running_crc ^ id_lo];
+                    ctx->running_crc = CRC8_SAE_J1850_TABLE[ctx->running_crc ^ id_hi];
+                }
                 ctx->fsm_state = FSM_READ_MSG_ID;
             } else if (byte != E2E_SYNC_BYTE_1) {
                 ctx->diag.resync_events++;
@@ -240,4 +275,133 @@ size_t bridge_cobs_decode(const uint8_t *input, size_t len, uint8_t *output, siz
         }
     }
     return write_idx;
+}
+
+size_t bridge_cobs_serialize_e2e(uint8_t id,
+                                 uint8_t seq,
+                                 const uint8_t *data,
+                                 uint8_t len,
+                                 uint8_t *out_buf,
+                                 size_t out_cap)
+{
+    if (out_buf == NULL) {
+        return 0U;
+    }
+    uint8_t raw[E2E_MAX_FRAME_SIZE];
+    int raw_len = bridge_serialize_e2e(id, seq, data, len, raw);
+    if (raw_len <= 0) {
+        return 0U;
+    }
+    size_t enc_len = bridge_cobs_encode(raw, (size_t)raw_len, out_buf, out_cap);
+    if (enc_len == 0U || enc_len >= out_cap) {
+        return 0U;
+    }
+    out_buf[enc_len] = 0x00U;
+    return enc_len + 1U;
+}
+
+size_t bridge_cobs_serialize_e2e_with_data_id(uint16_t data_id,
+                                              uint8_t id,
+                                              uint8_t seq,
+                                              const uint8_t *data,
+                                              uint8_t len,
+                                              uint8_t *out_buf,
+                                              size_t out_cap)
+{
+    if (out_buf == NULL) {
+        return 0U;
+    }
+    uint8_t raw[E2E_MAX_FRAME_SIZE];
+    int raw_len = bridge_serialize_e2e_with_data_id(data_id, id, seq, data, len, raw);
+    if (raw_len <= 0) {
+        return 0U;
+    }
+    size_t enc_len = bridge_cobs_encode(raw, (size_t)raw_len, out_buf, out_cap);
+    if (enc_len == 0U || enc_len >= out_cap) {
+        return 0U;
+    }
+    out_buf[enc_len] = 0x00U;
+    return enc_len + 1U;
+}
+
+bool bridge_cobs_feed_byte(bridge_parser_ctx_t *ctx,
+                           uint8_t byte,
+                           bridge_decoded_frame_t *out_frame)
+{
+    if (ctx == NULL || out_frame == NULL) {
+        return false;
+    }
+
+    if (byte != 0x00U) {
+        if (!ctx->cobs_overflow) {
+            if (ctx->cobs_idx < sizeof(ctx->cobs_buf)) {
+                ctx->cobs_buf[ctx->cobs_idx++] = byte;
+            } else {
+                ctx->cobs_overflow = true;
+            }
+        }
+        return false;
+    }
+
+    if (ctx->cobs_overflow) {
+        ctx->cobs_idx = 0U;
+        ctx->cobs_overflow = false;
+        ctx->diag.frames_crc_err++;
+        ctx->diag.resync_events++;
+        memset(out_frame, 0, sizeof(*out_frame));
+        out_frame->status = E2E_STATUS_FRAME_ERROR;
+        return true;
+    }
+
+    if (ctx->cobs_idx == 0U) {
+        return false;
+    }
+
+    uint8_t decoded[E2E_MAX_FRAME_SIZE];
+    size_t dec_len = bridge_cobs_decode(ctx->cobs_buf, ctx->cobs_idx, decoded, sizeof(decoded));
+    ctx->cobs_idx = 0U;
+
+    if (dec_len < E2E_FRAME_OVERHEAD) {
+        ctx->diag.frames_crc_err++;
+        ctx->diag.resync_events++;
+        memset(out_frame, 0, sizeof(*out_frame));
+        out_frame->status = E2E_STATUS_FRAME_ERROR;
+        return true;
+    }
+
+    bridge_parser_reset(ctx);
+    bool produced = false;
+    for (size_t i = 0U; i < dec_len; i++) {
+        if (bridge_parser_feed_byte(ctx, decoded[i], out_frame)) {
+            produced = true;
+            break;
+        }
+    }
+    if (!produced) {
+        bridge_parser_reset(ctx);
+        ctx->diag.frames_crc_err++;
+        ctx->diag.resync_events++;
+        memset(out_frame, 0, sizeof(*out_frame));
+        out_frame->status = E2E_STATUS_FRAME_ERROR;
+    }
+    return true;
+}
+
+size_t bridge_cobs_poll_ring(bridge_parser_ctx_t *ctx,
+                             bridge_decoded_frame_t *out_frames,
+                             size_t max_frames)
+{
+    if (ctx == NULL || out_frames == NULL || max_frames == 0U) {
+        return 0U;
+    }
+
+    size_t decoded_count = 0U;
+    uint8_t b = 0U;
+
+    while (decoded_count < max_frames && bridge_ring_pop(&ctx->rx_ring, &b)) {
+        if (bridge_cobs_feed_byte(ctx, b, &out_frames[decoded_count])) {
+            decoded_count++;
+        }
+    }
+    return decoded_count;
 }

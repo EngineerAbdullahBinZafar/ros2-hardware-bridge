@@ -26,11 +26,17 @@ jobs:
 
       - name: Run AddressSanitizer & UBSan Strict Checks
         run: |
+          gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ifirmware -Ifirmware/include -c \
+            firmware/src/ros2_bridge_fsm.c -o /tmp/ros2_bridge_fsm.o
+          gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ifirmware -Ifirmware/include -c \
+            firmware/src/stm32_uart_dma.c -o /tmp/stm32_uart_dma.o
           gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Ifirmware -Ifirmware/include \
-            firmware/src/ros2_bridge_fsm.c firmware/src/stm32_uart_dma.c firmware/tests/test_e2e_c.c -o /tmp/test_c_san
+            /tmp/ros2_bridge_fsm.o /tmp/stm32_uart_dma.o firmware/tests/test_e2e_c.c -o /tmp/test_c_san
           /tmp/test_c_san
-          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -Ifirmware -Ifirmware/include -Iros2_cpp/include \
-            firmware/src/ros2_bridge_fsm.c firmware/src/stm32_uart_dma.c ros2_cpp/tests/test_serial_e2e_cpp.cpp -o /tmp/test_cpp_san
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -Ifirmware -Ifirmware/include -Iros2_cpp/include -c \
+            ros2_cpp/tests/test_serial_e2e_cpp.cpp -o /tmp/test_serial_e2e_cpp.o
+          g++ -fsanitize=address,undefined \
+            /tmp/ros2_bridge_fsm.o /tmp/stm32_uart_dma.o /tmp/test_serial_e2e_cpp.o -o /tmp/test_cpp_san
           /tmp/test_cpp_san
 
   # ─── Job 2: Python Quality & Unit Tests ─────────────────────────────────────

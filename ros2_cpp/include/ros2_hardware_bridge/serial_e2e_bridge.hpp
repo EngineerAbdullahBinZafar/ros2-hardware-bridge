@@ -41,10 +41,16 @@ struct Imu6DofSample {
 
 class SerialE2ECodec {
 public:
-    explicit SerialE2ECodec(uint8_t max_delta_counter = 2U)
+    explicit SerialE2ECodec(uint8_t max_delta_counter = 2U,
+                            std::optional<uint16_t> data_id = std::nullopt)
         : tx_seq_(0U)
+        , data_id_(data_id)
     {
-        bridge_parser_init(&parser_ctx_, max_delta_counter);
+        if (data_id_.has_value()) {
+            bridge_parser_init_e2e(&parser_ctx_, max_delta_counter, *data_id_);
+        } else {
+            bridge_parser_init(&parser_ctx_, max_delta_counter);
+        }
     }
 
     /**
@@ -57,7 +63,32 @@ public:
         std::memcpy(payload.data() + sizeof(float), &cmd.angular_z, sizeof(float));
 
         std::array<uint8_t, 14> wire_frame{};
-        bridge_serialize_e2e(0x01U, tx_seq_, payload.data(), 8U, wire_frame.data());
+        if (data_id_.has_value()) {
+            bridge_serialize_e2e_with_data_id(*data_id_, 0x01U, tx_seq_, payload.data(), 8U, wire_frame.data());
+        } else {
+            bridge_serialize_e2e(0x01U, tx_seq_, payload.data(), 8U, wire_frame.data());
+        }
+        tx_seq_ = static_cast<uint8_t>((tx_seq_ + 1U) & 0x0FU);
+        return wire_frame;
+    }
+
+    /**
+     * @brief Serialize and COBS-frame an 8-byte Twist command (15 COBS bytes + 0x00 delimiter).
+     */
+    std::array<uint8_t, 16> encode_twist_cobs(const TwistCommand& cmd) noexcept
+    {
+        std::array<uint8_t, 8> payload{};
+        std::memcpy(payload.data(), &cmd.linear_x, sizeof(float));
+        std::memcpy(payload.data() + sizeof(float), &cmd.angular_z, sizeof(float));
+
+        std::array<uint8_t, 16> wire_frame{};
+        if (data_id_.has_value()) {
+            bridge_cobs_serialize_e2e_with_data_id(
+                *data_id_, 0x01U, tx_seq_, payload.data(), 8U, wire_frame.data(), wire_frame.size());
+        } else {
+            bridge_cobs_serialize_e2e(
+                0x01U, tx_seq_, payload.data(), 8U, wire_frame.data(), wire_frame.size());
+        }
         tx_seq_ = static_cast<uint8_t>((tx_seq_ + 1U) & 0x0FU);
         return wire_frame;
     }
@@ -76,7 +107,36 @@ public:
         std::memcpy(payload.data() + 20U, &sample.gz, sizeof(float));
 
         std::array<uint8_t, 30> wire_frame{};
-        bridge_serialize_e2e(0x12U, tx_seq_, payload.data(), 24U, wire_frame.data());
+        if (data_id_.has_value()) {
+            bridge_serialize_e2e_with_data_id(*data_id_, 0x12U, tx_seq_, payload.data(), 24U, wire_frame.data());
+        } else {
+            bridge_serialize_e2e(0x12U, tx_seq_, payload.data(), 24U, wire_frame.data());
+        }
+        tx_seq_ = static_cast<uint8_t>((tx_seq_ + 1U) & 0x0FU);
+        return wire_frame;
+    }
+
+    /**
+     * @brief Serialize and COBS-frame a 24-byte 6-DOF IMU packet (31 COBS bytes + 0x00 delimiter).
+     */
+    std::array<uint8_t, 32> encode_imu_cobs(const Imu6DofSample& sample) noexcept
+    {
+        std::array<uint8_t, 24> payload{};
+        std::memcpy(payload.data() + 0U, &sample.ax, sizeof(float));
+        std::memcpy(payload.data() + 4U, &sample.ay, sizeof(float));
+        std::memcpy(payload.data() + 8U, &sample.az, sizeof(float));
+        std::memcpy(payload.data() + 12U, &sample.gx, sizeof(float));
+        std::memcpy(payload.data() + 16U, &sample.gy, sizeof(float));
+        std::memcpy(payload.data() + 20U, &sample.gz, sizeof(float));
+
+        std::array<uint8_t, 32> wire_frame{};
+        if (data_id_.has_value()) {
+            bridge_cobs_serialize_e2e_with_data_id(
+                *data_id_, 0x12U, tx_seq_, payload.data(), 24U, wire_frame.data(), wire_frame.size());
+        } else {
+            bridge_cobs_serialize_e2e(
+                0x12U, tx_seq_, payload.data(), 24U, wire_frame.data(), wire_frame.size());
+        }
         tx_seq_ = static_cast<uint8_t>((tx_seq_ + 1U) & 0x0FU);
         return wire_frame;
     }
@@ -90,6 +150,21 @@ public:
         for (std::size_t i = 0U; i < length; ++i) {
             bridge_decoded_frame_t frame{};
             if (bridge_parser_feed_byte(&parser_ctx_, data[i], &frame)) {
+                results.push_back(frame);
+            }
+        }
+        return results;
+    }
+
+    /**
+     * @brief Feed a 0x00-delimited COBS byte span into bridge_cobs_feed_byte().
+     */
+    std::vector<bridge_decoded_frame_t> feed_cobs_bytes(const uint8_t* data, std::size_t length)
+    {
+        std::vector<bridge_decoded_frame_t> results;
+        for (std::size_t i = 0U; i < length; ++i) {
+            bridge_decoded_frame_t frame{};
+            if (bridge_cobs_feed_byte(&parser_ctx_, data[i], &frame)) {
                 results.push_back(frame);
             }
         }
@@ -129,6 +204,7 @@ public:
 private:
     bridge_parser_ctx_t parser_ctx_{};
     uint8_t tx_seq_;
+    std::optional<uint16_t> data_id_;
 };
 
 }  // namespace ros2_hardware_bridge

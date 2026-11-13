@@ -113,6 +113,78 @@ static void test_cobs_roundtrip_zero_free(void)
     printf("  [PASS] test_cobs_roundtrip_zero_free\n");
 }
 
+static void test_max_delta_counter_and_desync(void)
+{
+    bridge_parser_ctx_t ctx;
+    bridge_parser_init(&ctx, 2U);
+
+    uint8_t f0[32], f1[32], f2[32], f3[32], f4[32];
+    const uint8_t p[4] = { 0x01, 0x02, 0x03, 0x04 };
+    int l0 = bridge_serialize_e2e(0x01U, 0x00U, p, 4U, f0);
+    int l1 = bridge_serialize_e2e(0x01U, 0x00U, p, 4U, f1); /* repeated */
+    int l2 = bridge_serialize_e2e(0x01U, 0x02U, p, 4U, f2); /* lost 1 (delta=1 <= 2) */
+    int l3 = bridge_serialize_e2e(0x01U, 0x07U, p, 4U, f3); /* lost 4 (delta=4 > 2 => DESYNC) */
+    int l4 = bridge_serialize_e2e(0x01U, 0x08U, p, 4U, f4); /* consecutive after DESYNC => OK */
+
+    bridge_ring_push_isr(&ctx.rx_ring, f0, (size_t)l0);
+    bridge_ring_push_isr(&ctx.rx_ring, f1, (size_t)l1);
+    bridge_ring_push_isr(&ctx.rx_ring, f2, (size_t)l2);
+    bridge_ring_push_isr(&ctx.rx_ring, f3, (size_t)l3);
+    bridge_ring_push_isr(&ctx.rx_ring, f4, (size_t)l4);
+
+    bridge_decoded_frame_t out[8];
+    size_t n = bridge_parser_poll_ring(&ctx, out, 8U);
+    assert(n == 5U);
+    assert(out[0].status == E2E_STATUS_INITIAL);
+    assert(out[1].status == E2E_STATUS_REPEATED);
+    assert(out[2].status == E2E_STATUS_WRONG_SEQUENCE);
+    assert(out[2].lost_frames == 1U);
+    assert(out[3].status == E2E_STATUS_DESYNC);
+    assert(out[3].lost_frames == 4U);
+    assert(out[4].status == E2E_STATUS_OK);
+    printf("  [PASS] test_max_delta_counter_and_desync\n");
+}
+
+static void test_data_id_authentication_and_cobs_e2e(void)
+{
+    const uint16_t DATA_ID = 0x1A2BU;
+    bridge_parser_ctx_t rx_ok;
+    bridge_parser_ctx_t rx_wrong_id;
+    bridge_parser_init_e2e(&rx_ok, 2U, DATA_ID);
+    bridge_parser_init_e2e(&rx_wrong_id, 2U, 0x9999U);
+
+    const uint8_t payload[8] = { 0x00, 0x11, 0x00, 0x22, 0xAA, 0x55, 0x00, 0x7F };
+    uint8_t wire[E2E_COBS_MAX_FRAME];
+    size_t wire_len = bridge_cobs_serialize_e2e_with_data_id(
+        DATA_ID, 0x01U, 0x03U, payload, 8U, wire, sizeof(wire));
+    assert(wire_len == 16U);
+    assert(wire[wire_len - 1U] == 0x00U);
+    for (size_t i = 0U; i < wire_len - 1U; i++) {
+        assert(wire[i] != 0x00U);
+    }
+
+    bridge_ring_push_isr(&rx_ok.rx_ring, wire, wire_len);
+    bridge_decoded_frame_t out_ok[2];
+    assert(bridge_cobs_poll_ring(&rx_ok, out_ok, 2U) == 1U);
+    assert(out_ok[0].status == E2E_STATUS_INITIAL);
+    assert(out_ok[0].msg_id == 0x01U);
+    assert(out_ok[0].seq_ctr == 0x03U);
+    assert(memcmp(out_ok[0].payload, payload, 8U) == 0);
+
+    bridge_ring_push_isr(&rx_wrong_id.rx_ring, wire, wire_len);
+    bridge_decoded_frame_t out_bad[2];
+    assert(bridge_cobs_poll_ring(&rx_wrong_id, out_bad, 2U) == 1U);
+    assert(out_bad[0].status == E2E_STATUS_CRC_ERROR);
+
+    /* Raw validate with Data ID */
+    uint8_t raw[32];
+    int raw_len = bridge_serialize_e2e_with_data_id(DATA_ID, 0x01U, 0x03U, payload, 8U, raw);
+    assert(raw_len == 14);
+    assert(bridge_validate_e2e_with_data_id(DATA_ID, raw, (size_t)raw_len) == true);
+    assert(bridge_validate_e2e_with_data_id(0x0000U, raw, (size_t)raw_len) == false);
+    printf("  [PASS] test_data_id_authentication_and_cobs_e2e\n");
+}
+
 int main(void)
 {
     printf("Running ROS 2 Hardware Bridge C11 Firmware Verification...\n");
@@ -120,6 +192,8 @@ int main(void)
     test_fsm_garbage_resync_and_sequence();
     test_dma_ringbuf_wrap_and_overrun();
     test_cobs_roundtrip_zero_free();
+    test_max_delta_counter_and_desync();
+    test_data_id_authentication_and_cobs_e2e();
     printf("ALL C11 FIRMWARE TESTS PASSED.\n");
     return 0;
 }
